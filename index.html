@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EML Reader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0d0f14; --surface: #13161e; --card: #181c26;
+      --border: rgba(255,255,255,0.07); --accent: #6c63ff; --accent2: #a78bfa;
+      --text: #e2e8f0; --muted: #64748b; --radius: 14px;
+    }
+    html { font-size: 16px; }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; min-height: 100vh; overflow: hidden; }
+    body::before {
+      content:''; position:fixed; inset:0; z-index:0; pointer-events:none;
+      background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      opacity:.025; mix-blend-mode:overlay;
+    }
+    .app { position:relative; z-index:1; display:flex; flex-direction:column; height:100vh; }
+    header {
+      display:flex; align-items:center; gap:14px; padding:14px 28px;
+      border-bottom:1px solid var(--border);
+      background:rgba(13,15,20,0.9); backdrop-filter:blur(20px); flex-shrink:0;
+    }
+    .logo-icon { width:34px; height:34px; background:linear-gradient(135deg,var(--accent),var(--accent2)); border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:17px; box-shadow:0 0 18px rgba(108,99,255,.35); }
+    .logo-text { font-size:1.05rem; font-weight:700; background:linear-gradient(90deg,#fff 30%,var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+    .logo-sub  { font-size:.65rem; color:var(--muted); letter-spacing:1px; text-transform:uppercase; }
+    .badge { font-size:.7rem; padding:3px 10px; border-radius:20px; font-weight:600; background:rgba(108,99,255,.2); color:var(--accent2); border:1px solid rgba(108,99,255,.3); }
+    .badge:last-child { margin-left:auto; }
+    .badge-btn { cursor:pointer; font-family:'Inter',sans-serif; background:rgba(248,113,113,.1); color:#f87171; border-color:rgba(248,113,113,.3); transition:all .17s; }
+    .badge-btn:hover { background:rgba(248,113,113,.2); }
+    .main { display:grid; grid-template-columns:300px 1fr; flex:1; min-height:0; }
+    .sidebar { border-right:1px solid var(--border); display:flex; flex-direction:column; min-height:0; }
+    .drop-area {
+      margin:16px; border:2px dashed rgba(108,99,255,.35); border-radius:var(--radius);
+      padding:22px 16px; text-align:center; cursor:pointer; position:relative;
+      background:rgba(108,99,255,.04); transition:all .22s;
+    }
+    .drop-area:hover, .drop-area.over { border-color:var(--accent); background:rgba(108,99,255,.1); transform:scale(1.01); }
+    .drop-area input { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+    .drop-icon { font-size:2rem; margin-bottom:8px; }
+    .drop-title { font-size:.85rem; font-weight:600; }
+    .drop-hint  { font-size:.72rem; color:var(--muted); margin-top:3px; }
+    .list-label { padding:0 16px 8px; font-size:.68rem; font-weight:600; letter-spacing:1.2px; text-transform:uppercase; color:var(--muted); display:flex; align-items:center; gap:8px; }
+    .count-pill { background:rgba(108,99,255,.2); color:var(--accent2); font-size:.63rem; padding:1px 7px; border-radius:20px; }
+    .email-list { flex:1; overflow-y:auto; padding:0 8px 16px; scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+    .email-list::-webkit-scrollbar { width:4px; } .email-list::-webkit-scrollbar-thumb { background:var(--border); border-radius:4px; }
+    .email-item { padding:11px 12px; border-radius:10px; cursor:pointer; border:1px solid transparent; margin-bottom:3px; transition:background .15s; }
+    .email-item:hover  { background:rgba(255,255,255,.04); }
+    .email-item.active { background:rgba(108,99,255,.12); border-color:rgba(108,99,255,.3); }
+    .item-from    { font-size:.8rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:3px; }
+    .item-subject { font-size:.76rem; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:3px; }
+    .item-meta    { display:flex; justify-content:space-between; }
+    .item-date    { font-size:.66rem; color:var(--muted); font-family:'JetBrains Mono',monospace; }
+    .item-attach  { font-size:.66rem; color:var(--accent2); }
+    .empty-list   { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color:var(--muted); text-align:center; padding:24px; gap:10px; }
+    .empty-list span { font-size:2.5rem; opacity:.3; }
+    .empty-list p { font-size:.78rem; line-height:1.65; }
+    .viewer { display:flex; flex-direction:column; min-height:0; background:var(--surface); }
+    .viewer-placeholder { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--muted); text-align:center; padding:40px; gap:14px; }
+    .viewer-placeholder span { font-size:4rem; opacity:.12; }
+    .viewer-placeholder h2 { font-size:1rem; font-weight:600; color:var(--muted); }
+    .viewer-placeholder p  { font-size:.8rem; max-width:280px; line-height:1.7; }
+    .email-header { padding:22px 28px 18px; border-bottom:1px solid var(--border); background:var(--card); flex-shrink:0; }
+    .email-subject { font-size:1.2rem; font-weight:700; line-height:1.35; letter-spacing:-.3px; margin-bottom:14px; }
+    .meta-grid { display:grid; gap:7px; }
+    .meta-row  { display:flex; gap:10px; align-items:flex-start; font-size:.8rem; }
+    .meta-key  { color:var(--muted); font-size:.68rem; font-weight:600; letter-spacing:.5px; text-transform:uppercase; min-width:48px; padding-top:2px; flex-shrink:0; }
+    .meta-val  { color:var(--text); line-height:1.5; word-break:break-word; }
+    .chip { display:inline-flex; align-items:center; background:rgba(255,255,255,.06); border:1px solid var(--border); padding:1px 8px; border-radius:20px; font-size:.73rem; margin:2px 3px 0 0; }
+    .viewer-toolbar { display:flex; align-items:center; gap:6px; padding:8px 28px; border-bottom:1px solid var(--border); background:var(--card); flex-shrink:0; flex-wrap:wrap; }
+    .tb-btn { background:rgba(255,255,255,.05); border:1px solid var(--border); color:var(--text); border-radius:7px; padding:4px 12px; font-size:.74rem; cursor:pointer; font-family:'Inter',sans-serif; transition:all .17s; }
+    .tb-btn:hover  { background:rgba(108,99,255,.15); border-color:rgba(108,99,255,.4); color:var(--accent2); }
+    .tb-btn.active { background:rgba(108,99,255,.2); border-color:var(--accent); color:var(--accent2); }
+    .tb-sep { width:1px; height:18px; background:var(--border); margin:0 4px; }
+    .tb-spacer { flex:1; min-width:10px; }
+    .tb-search { background:rgba(255,255,255,.04); border:1px solid var(--border); border-radius:7px; padding:4px 11px; color:var(--text); font-size:.74rem; font-family:'Inter',sans-serif; outline:none; width:200px; transition:border .17s; }
+    .tb-search:focus { border-color:rgba(108,99,255,.5); }
+    .tb-search::placeholder { color:var(--muted); }
+    .email-body-wrap { flex:1; overflow:hidden; min-height:0; display:flex; flex-direction:column; }
+    .email-body-wrap.scrollable { overflow-y:auto; padding:24px 28px; scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+    .email-body-wrap.scrollable::-webkit-scrollbar { width:5px; } .email-body-wrap.scrollable::-webkit-scrollbar-thumb { background:var(--border); border-radius:4px; }
+    .html-frame { flex:1; width:100%; border:none; background:#fff; display:block; min-height:0; }
+    .plain-text, .raw-headers { font-family:'JetBrains Mono',monospace; font-size:.8rem; white-space:pre-wrap; line-height:1.8; background:rgba(0,0,0,.3); border:1px solid var(--border); border-radius:var(--radius); padding:18px 22px; }
+    .raw-headers { color:var(--muted); }
+    .hkey { color:var(--accent2); }
+    .attach-section { padding:0 28px 22px; flex-shrink:0; }
+    .attach-label   { font-size:.68rem; font-weight:600; letter-spacing:1px; text-transform:uppercase; color:var(--muted); margin-bottom:9px; }
+    .attach-list    { display:flex; flex-wrap:wrap; gap:7px; }
+    .attach-chip    { display:inline-flex; align-items:center; gap:8px; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:7px 13px; cursor:pointer; transition:all .17s; color:var(--text); text-decoration:none; }
+    .attach-chip:hover { border-color:var(--accent); background:rgba(108,99,255,.1); }
+    .a-icon { font-size:1rem; }
+    .a-name { font-size:.76rem; font-weight:500; }
+    .a-type { font-size:.65rem; color:var(--muted); }
+    @keyframes fadeUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+    .anim-in { animation:fadeUp .28s ease both; }
+    mark { background:rgba(108,99,255,.4); color:var(--text); border-radius:3px; padding:0 2px; }
+    @media(max-width:700px) {
+      .main { grid-template-columns:1fr; grid-template-rows:240px 1fr; }
+      .sidebar { border-right:none; border-bottom:1px solid var(--border); }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo-icon">&#x2709;&#xFE0F;</div>
+    <div>
+      <div class="logo-text">EML Reader</div>
+      <div class="logo-sub">Email File Viewer</div>
+    </div>
+    <button class="badge badge-btn" onclick="clearStorage()" title="Remove all saved emails from browser storage">&#x1F5D1; Clear saved</button>
+    <span class="badge">&#10022; Offline &amp; Private</span>
+  </header>
+
+  <div class="main">
+    <aside class="sidebar">
+      <div class="drop-area" id="dropArea">
+        <input type="file" id="fileInput" accept=".eml" multiple />
+        <div class="drop-icon">&#x1F4C2;</div>
+        <div class="drop-title">Drop .eml files here</div>
+        <div class="drop-hint">or click to browse</div>
+      </div>
+      <div class="list-label">Emails <span class="count-pill" id="countPill">0</span></div>
+      <div class="email-list" id="emailList">
+        <div class="empty-list">
+          <span>&#x1F4ED;</span>
+          <p>No emails loaded yet.<br/>Drop an .eml file above to get started.</p>
+        </div>
+      </div>
+    </aside>
+
+    <section class="viewer" id="viewer">
+      <div class="viewer-placeholder">
+        <span>&#x1F48C;</span>
+        <h2>Select an email to read</h2>
+        <p>Load .eml files and click one to view it. Everything stays local &mdash; nothing is uploaded.</p>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+var emails = [];
+var activeIdx = null;
+var viewMode  = 'html';
+var blobUrls  = [];
+var LS_KEY   = 'emlreader_emails';
+
+/* ---- Restore from localStorage on startup ---- */
+(function restoreFromStorage(){
+  try {
+    var saved = localStorage.getItem(LS_KEY);
+    if(!saved) return;
+    var arr = JSON.parse(saved);
+    if(!Array.isArray(arr) || !arr.length) return;
+    arr.forEach(function(e){ emails.push(e); });
+    renderList();
+    openEmail(0);
+  } catch(e){ console.warn('Could not restore emails from storage:', e); }
+})();
+
+var dropArea  = document.getElementById('dropArea');
+var fileInput = document.getElementById('fileInput');
+
+dropArea.addEventListener('dragenter', function(e){ e.preventDefault(); dropArea.classList.add('over'); });
+dropArea.addEventListener('dragover',  function(e){ e.preventDefault(); dropArea.classList.add('over'); });
+dropArea.addEventListener('dragleave', function(){ dropArea.classList.remove('over'); });
+dropArea.addEventListener('drop', function(e){
+  e.preventDefault();
+  dropArea.classList.remove('over');
+  loadFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', function(e){ loadFiles(e.target.files); fileInput.value=''; });
+
+function loadFiles(fileList){
+  Array.from(fileList).forEach(function(f){
+    if(!f.name.toLowerCase().endsWith('.eml')) return;
+    var reader = new FileReader();
+    reader.onload = function(ev){
+      try {
+        var parsed = parseEml(ev.target.result, f.name);
+        /* skip duplicates by filename */
+        var exists = emails.some(function(e){ return e.filename === parsed.filename; });
+        if(exists) return;
+        emails.push(parsed);
+        saveToStorage();
+        renderList();
+        if(emails.length === 1) openEmail(0);
+      } catch(err){ console.error('EML parse error:', err); }
+    };
+    reader.readAsText(f, 'utf-8');
+  });
+}
+
+function saveToStorage(){
+  try {
+    /* strip blob-heavy attachment data that could exceed quota;
+       keep everything else including raw text/html bodies */
+    var slim = emails.map(function(e){
+      return Object.assign({}, e, {
+        attachments: e.attachments.map(function(a){
+          return { name:a.name, type:a.type, enc:a.enc, data:a.data };
+        })
+      });
+    });
+    localStorage.setItem(LS_KEY, JSON.stringify(slim));
+  } catch(e){
+    /* QuotaExceededError — silently ignore; storage is best-effort */
+    console.warn('localStorage quota exceeded, emails not saved:', e);
+  }
+}
+
+function clearStorage(){
+  localStorage.removeItem(LS_KEY);
+  emails.length = 0;
+  activeIdx = null;
+  renderList();
+  document.getElementById('viewer').innerHTML =
+    '<div class="viewer-placeholder"><span>&#x1F48C;</span><h2>Select an email to read</h2><p>All saved emails cleared.</p></div>';
+}
+
+/* ---- EML parser ---- */
+function parseEml(raw, filename){
+  raw = raw.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+  var blankIdx = raw.indexOf('\n\n');
+  var headerSec = blankIdx >= 0 ? raw.slice(0, blankIdx) : raw;
+  var bodySec   = blankIdx >= 0 ? raw.slice(blankIdx + 2) : '';
+
+  /* unfold headers */
+  var unfolded = [];
+  headerSec.split('\n').forEach(function(line){
+    if(/^[ \t]/.test(line) && unfolded.length > 0) unfolded[unfolded.length-1] += ' ' + line.trim();
+    else unfolded.push(line);
+  });
+
+  var headers = {};
+  unfolded.forEach(function(line){
+    var colon = line.indexOf(':');
+    if(colon < 0) return;
+    var k = line.slice(0,colon).trim().toLowerCase();
+    var v = line.slice(colon+1).trim();
+    headers[k] = headers[k] !== undefined ? headers[k]+'\n'+v : v;
+  });
+
+  var email = {
+    filename:    filename,
+    headers:     headers,
+    rawLines:    unfolded,
+    subject:     decodeHdr(headers['subject'] || '(No Subject)'),
+    from:        decodeHdr(headers['from']    || ''),
+    to:          decodeHdr(headers['to']      || ''),
+    cc:          decodeHdr(headers['cc']      || ''),
+    date:        headers['date'] || '',
+    html:        '',
+    text:        '',
+    attachments: []
+  };
+
+  var ct       = headers['content-type'] || 'text/plain';
+  var boundary = getBoundary(ct);
+  if(boundary){
+    parseParts(bodySec, boundary, email);
+  } else {
+    var ctBase = ct.split(';')[0].trim().toLowerCase();
+    var enc    = (headers['content-transfer-encoding'] || '').trim().toLowerCase();
+    var body   = decodeTransfer(bodySec, enc);
+    if(ctBase === 'text/html') email.html = body;
+    else email.text = body;
+  }
+  return email;
+}
+
+function parseParts(body, boundary, email){
+  var delim  = '\n--' + boundary;
+  var chunks = ('\n' + body).split(delim);
+  for(var ci = 1; ci < chunks.length; ci++){
+    var chunk = chunks[ci];
+    if(chunk.slice(0,2) === '--') continue;
+    var partRaw = chunk.charAt(0)==='\n' ? chunk.slice(1) : chunk;
+    var blankIdx = partRaw.indexOf('\n\n');
+    var phSec = blankIdx >= 0 ? partRaw.slice(0, blankIdx) : partRaw;
+    var pbSec = blankIdx >= 0 ? partRaw.slice(blankIdx+2) : '';
+
+    var phUnf = [];
+    phSec.split('\n').forEach(function(l){
+      if(/^[ \t]/.test(l) && phUnf.length>0) phUnf[phUnf.length-1] += ' '+l.trim();
+      else phUnf.push(l);
+    });
+    var ph = {};
+    phUnf.forEach(function(l){
+      var c=l.indexOf(':'); if(c<0) return;
+      ph[l.slice(0,c).trim().toLowerCase()] = l.slice(c+1).trim();
+    });
+
+    var pCT    = ph['content-type']               || 'text/plain';
+    var pEnc   = (ph['content-transfer-encoding'] || '').trim().toLowerCase();
+    var pDisp  = ph['content-disposition']         || '';
+    var pCtBase= pCT.split(';')[0].trim().toLowerCase();
+    var pBound = getBoundary(pCT);
+
+    if(pBound){ parseParts(pbSec, pBound, email); continue; }
+
+    var isAtt = /attachment/i.test(pDisp) || /^(application|image|audio|video)/.test(pCtBase);
+    if(isAtt){
+      var nm = (pDisp.match(/filename\*?=["']?([^"';\r\n]+)/i) || pCT.match(/name=["']?([^"';\r\n]+)/i) || [])[1] || 'attachment';
+      nm = decodeHdr(nm.replace(/^[Uu][Tt][Ff]-8''/,'').trim());
+      var data = pbSec.trim();
+      if(data) email.attachments.push({name:nm, type:pCtBase, data:data, enc:pEnc});
+      continue;
+    }
+    var decoded = decodeTransfer(pbSec, pEnc);
+    if(pCtBase==='text/html'  && !email.html) email.html = decoded;
+    else if(pCtBase==='text/plain' && !email.text) email.text = decoded;
+  }
+}
+
+function getBoundary(ct){
+  var m = ct.match(/boundary=["']?([^"';\s\r\n]+)/i);
+  return m ? m[1].replace(/^"|"$/g,'') : null;
+}
+
+function decodeTransfer(body, enc){
+  if(enc==='base64'){
+    try{
+      var b64   = body.replace(/\s+/g,'');
+      var bin   = atob(b64);
+      var bytes = new Uint8Array(bin.length);
+      for(var i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+      return new TextDecoder('utf-8',{fatal:false}).decode(bytes);
+    }catch(e){ return body; }
+  }
+  if(enc==='quoted-printable'){
+    return body.replace(/=\r?\n/g,'').replace(/=([0-9A-Fa-f]{2})/g,function(_,h){ return String.fromCharCode(parseInt(h,16)); });
+  }
+  return body;
+}
+
+function decodeHdr(str){
+  if(!str) return '';
+  return str.replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g, function(_,charset,enc,data){
+    try{
+      if(enc.toUpperCase()==='B'){
+        var bin=atob(data.replace(/\s+/g,''));
+        var bytes=new Uint8Array(bin.length);
+        for(var i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+        return new TextDecoder(charset,{fatal:false}).decode(bytes);
+      } else {
+        return data.replace(/_/g,' ').replace(/=([0-9A-Fa-f]{2})/g,function(_,h){ return String.fromCharCode(parseInt(h,16)); });
+      }
+    }catch(e){ return data; }
+  });
+}
+
+/* ---- Helpers ---- */
+function esc(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function shortSender(addr){
+  if(!addr) return '';
+  var m=addr.match(/^"?([^"<,]+)"?\s*</); if(m) return m[1].trim();
+  var m2=addr.match(/<([^>]+)>/); if(m2) return m2[1].split('@')[0];
+  return addr.split('@')[0];
+}
+function fmtDate(str){
+  if(!str) return '';
+  try{ var d=new Date(str); if(isNaN(d)) return str.slice(0,20);
+    return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+  }catch(e){ return str.slice(0,20); }
+}
+function addrChips(str){
+  if(!str) return '<span style="color:var(--muted)">&#8212;</span>';
+  return str.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(function(p){
+    return '<span class="chip">'+esc(p.trim())+'</span>';
+  }).join('');
+}
+function attachIcon(type){
+  if(/^image/i.test(type)) return '&#x1F5BC;&#xFE0F;';
+  if(/pdf/i.test(type))    return '&#x1F4D5;';
+  if(/zip|rar|7z|compress/i.test(type)) return '&#x1F5DC;&#xFE0F;';
+  if(/word|\.doc/i.test(type)) return '&#x1F4DD;';
+  if(/excel|sheet|csv/i.test(type)) return '&#x1F4CA;';
+  if(/audio/i.test(type)) return '&#x1F3B5;';
+  if(/video/i.test(type)) return '&#x1F3AC;';
+  return '&#x1F4CE;';
+}
+
+/* ---- Render list ---- */
+function renderList(){
+  document.getElementById('countPill').textContent = emails.length;
+  var list = document.getElementById('emailList');
+  if(!emails.length){
+    list.innerHTML='<div class="empty-list"><span>&#x1F4ED;</span><p>No emails yet.</p></div>';
+    return;
+  }
+  list.innerHTML = emails.map(function(e,i){
+    return '<div class="email-item'+(i===activeIdx?' active':'')+'" data-i="'+i+'">'
+      +'<div class="item-from">'+esc(shortSender(e.from)||e.filename)+'</div>'
+      +'<div class="item-subject">'+esc(e.subject)+'</div>'
+      +'<div class="item-meta"><span class="item-date">'+esc(fmtDate(e.date))+'</span>'
+      +(e.attachments.length?'<span class="item-attach">&#x1F4CE; '+e.attachments.length+'</span>':'')
+      +'</div></div>';
+  }).join('');
+  list.querySelectorAll('.email-item').forEach(function(el){
+    el.addEventListener('click', function(){ openEmail(+el.dataset.i); });
+  });
+}
+
+/* ---- Open email ---- */
+function openEmail(idx){
+  activeIdx = idx;
+  var e = emails[idx];
+  viewMode = e.html ? 'html' : (e.text ? 'text' : 'raw');
+  renderList();
+  renderViewer();
+}
+
+/* ---- Render viewer ---- */
+function renderViewer(){
+  blobUrls.forEach(function(u){ URL.revokeObjectURL(u); });
+  blobUrls = [];
+
+  var email  = emails[activeIdx];
+  var viewer = document.getElementById('viewer');
+
+  var ccRow = email.cc
+    ? '<div class="meta-row"><span class="meta-key">CC</span><span class="meta-val">'+addrChips(email.cc)+'</span></div>'
+    : '';
+
+  viewer.innerHTML =
+    '<div class="email-header anim-in">'
+    +'<div class="email-subject">'+esc(email.subject)+'</div>'
+    +'<div class="meta-grid">'
+    +'<div class="meta-row"><span class="meta-key">From</span><span class="meta-val">'+addrChips(email.from)+'</span></div>'
+    +'<div class="meta-row"><span class="meta-key">To</span><span class="meta-val">'+addrChips(email.to)+'</span></div>'
+    +ccRow
+    +'<div class="meta-row"><span class="meta-key">Date</span><span class="meta-val">'+esc(email.date)+'</span></div>'
+    +'</div></div>'
+    +'<div class="viewer-toolbar" id="toolbar"></div>'
+    +'<div class="email-body-wrap" id="bodyWrap"></div>'
+    +(email.attachments.length
+      ?'<div class="attach-section anim-in"><div class="attach-label">Attachments ('+email.attachments.length+')</div><div class="attach-list" id="attachList"></div></div>'
+      :'');
+
+  /* toolbar */
+  var tb = document.getElementById('toolbar');
+  if(email.html){
+    var b=document.createElement('button');
+    b.className='tb-btn'+(viewMode==='html'?' active':'');
+    b.textContent='HTML';
+    b.onclick=function(){ viewMode='html'; renderViewer(); };
+    tb.appendChild(b);
+    tb.appendChild(makeSep());
+  }
+  if(email.text){
+    var b2=document.createElement('button');
+    b2.className='tb-btn'+(viewMode==='text'?' active':'');
+    b2.textContent='Plain Text';
+    b2.onclick=function(){ viewMode='text'; renderViewer(); };
+    tb.appendChild(b2);
+    tb.appendChild(makeSep());
+  }
+  var b3=document.createElement('button');
+  b3.className='tb-btn'+(viewMode==='raw'?' active':'');
+  b3.textContent='Raw Headers';
+  b3.onclick=function(){ viewMode='raw'; renderViewer(); };
+  tb.appendChild(b3);
+
+  var sp=document.createElement('span'); sp.className='tb-spacer'; tb.appendChild(sp);
+  var si=document.createElement('input'); si.className='tb-search'; si.placeholder='Search...'; si.id='searchBox';
+  si.addEventListener('input',function(){ doSearch(si.value); });
+  tb.appendChild(si);
+
+  renderBody(email);
+
+  /* attachments */
+  if(email.attachments.length){
+    var al=document.getElementById('attachList');
+    email.attachments.forEach(function(att,ai){
+      var chip=document.createElement('a');
+      chip.href='#'; chip.className='attach-chip';
+      chip.innerHTML='<span class="a-icon">'+attachIcon(att.type)+'</span>'
+        +'<span><div class="a-name">'+esc(att.name)+'</div>'
+        +'<div class="a-type">'+esc((att.type.split('/')[1])||att.type)+'</div></span>';
+      (function(capturedAi){ chip.addEventListener('click',function(ev){ ev.preventDefault(); downloadAtt(activeIdx,capturedAi); }); })(ai);
+      al.appendChild(chip);
+    });
+  }
+}
+
+function makeSep(){ var s=document.createElement('span'); s.className='tb-sep'; return s; }
+
+function renderBody(email){
+  var wrap=document.getElementById('bodyWrap');
+  if(!wrap) return;
+  wrap.innerHTML='';
+
+  if(viewMode==='html' && email.html){
+    var blob=new Blob([
+      '<!DOCTYPE html><html><head><meta charset="utf-8">'
+      +'<style>body{font-family:Arial,sans-serif;font-size:14px;color:#111;padding:12px;margin:0;word-break:break-word}'
+      +'img{max-width:100%}a{color:#6c63ff}</style></head><body>'+email.html+'</body></html>'
+    ],{type:'text/html'});
+    var url=URL.createObjectURL(blob);
+    blobUrls.push(url);
+    /* iframe fills the full wrap — no extra onload resize needed */
+    var iframe=document.createElement('iframe');
+    iframe.className='html-frame';
+    iframe.setAttribute('sandbox','allow-same-origin');
+    iframe.src=url;
+    wrap.appendChild(iframe);
+    return;
+  }
+  /* text / raw views need padding + scroll */
+  wrap.classList.add('scrollable');
+  if(viewMode==='text' && email.text){
+    var pre=document.createElement('pre');
+    pre.className='plain-text'; pre.id='bodyText';
+    pre.textContent=email.text;
+    wrap.appendChild(pre);
+    return;
+  }
+  /* raw */
+  var pre2=document.createElement('pre');
+  pre2.className='raw-headers'; pre2.id='bodyText';
+  pre2.innerHTML=email.rawLines.map(function(l){
+    var c=l.indexOf(':'); if(c<0) return esc(l);
+    return '<span class="hkey">'+esc(l.slice(0,c))+':</span>'+esc(l.slice(c+1));
+  }).join('\n');
+  wrap.appendChild(pre2);
+}
+
+function doSearch(q){
+  var bt=document.getElementById('bodyText');
+  if(!bt) return;
+  var email=emails[activeIdx];
+  var src = viewMode==='raw' ? email.rawLines.join('\n') : (email.text||'');
+  if(!q.trim()){ bt.textContent=src; if(viewMode==='raw') renderBody(email); return; }
+  var escaped=esc(src);
+  var re=new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi');
+  bt.innerHTML=escaped.replace(re,function(m){ return '<mark>'+m+'</mark>'; });
+}
+
+function downloadAtt(emailIdx, attIdx){
+  var att=emails[emailIdx].attachments[attIdx];
+  try{
+    var blob;
+    if(att.enc==='base64'){
+      var bin=atob(att.data.replace(/\s+/g,''));
+      var bytes=new Uint8Array(bin.length);
+      for(var i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+      blob=new Blob([bytes],{type:att.type});
+    } else {
+      blob=new Blob([att.data],{type:att.type});
+    }
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');
+    a.href=url; a.download=att.name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); },10000);
+  }catch(e){ alert('Download failed: '+e.message); }
+}
+</script>
+</body>
+</html>
